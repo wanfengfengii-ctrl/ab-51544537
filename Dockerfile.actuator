@@ -1,0 +1,9 @@
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /srv
+COPY actuator/mock_actuator.py ./mock_actuator.py
+
+EXPOSE 8090
+CMD ["python", "mock_actuator.py"]

@@ -1,4 +1,20 @@
-.DS_Store
-.env
-node_modules/
+# Python
 __pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Local env / editor
+.env
+*.local
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# Data / logs
+*.log
+pgdata/

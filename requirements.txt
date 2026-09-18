@@ -1,0 +1,10 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+psycopg[binary]==3.2.3
+psycopg-pool==3.2.4
+cryptography==44.0.0
+pydantic==2.10.4
+# Test tooling lives in the same image so `docker compose run verify` needs
+# nothing installed on the host.
+pytest==8.3.4
+requests==2.32.3

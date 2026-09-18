@@ -1,0 +1,148 @@
+name: substation-switching
+
+x-api-env: &api-env
+  POSTGRES_HOST: db
+  POSTGRES_DB: substation
+  POSTGRES_USER: substation
+  POSTGRES_PASSWORD: substation
+  ACTUATOR_URL: http://actuator:8090
+  DELIVERY_LEASE_SECONDS: "10"
+  BACKOFF_SECONDS: "0.2,0.5,1,2,5"
+  HTTP_TIMEOUT_SECONDS: "3"
+  POLL_SECONDS: "0.2"
+
+x-worker-env: &worker-env
+  POSTGRES_HOST: db
+  POSTGRES_DB: substation
+  POSTGRES_USER: substation
+  POSTGRES_PASSWORD: substation
+  ACTUATOR_URL: http://actuator:8090
+  DELIVERY_LEASE_SECONDS: "10"
+  BACKOFF_SECONDS: "0.2,0.5,1,2,5"
+  HTTP_TIMEOUT_SECONDS: "3"
+  POLL_SECONDS: "0.2"
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: substation
+      POSTGRES_USER: substation
+      POSTGRES_PASSWORD: substation
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U substation -d substation"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    networks: [internal]
+
+  api1: &api-service
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment: *api-env
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/readyz', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    networks: [internal]
+
+  api2:
+    <<: *api-service
+
+  worker1: &worker-service
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "worker"]
+    environment: *worker-env
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL",
+             "test $$(( $$(date +%s) - $$(stat -c %Y /tmp/worker-heartbeat 2>/dev/null || echo 0) )) -lt 15"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks: [internal]
+
+  worker2:
+    <<: *worker-service
+
+  actuator:
+    build:
+      context: .
+      dockerfile: Dockerfile.actuator
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8090/healthz', timeout=3)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [internal]
+
+  proxy:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      # The ONLY host-published port; configurable via API_PORT.
+      - "${API_PORT:-8080}:80"
+    depends_on: &api-depends
+      api1:
+        condition: service_healthy
+      api2:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/healthz >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    networks: [internal]
+
+  # One-shot acceptance suite. Run with:
+  #   docker compose --profile verify run --rm verify
+  verify:
+    profiles: ["verify"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "pytest", "-v", "--tb=short", "tests"]
+    environment:
+      <<: *api-env
+      BASE_URL: http://proxy
+      ACTUATOR_URL: http://actuator:8090
+      PYTHONPATH: /srv
+    depends_on:
+      db:
+        condition: service_healthy
+      actuator:
+        condition: service_healthy
+      api1:
+        condition: service_healthy
+      api2:
+        condition: service_healthy
+      worker1:
+        condition: service_healthy
+      worker2:
+        condition: service_healthy
+      proxy:
+        condition: service_healthy
+    networks: [internal]
+
+volumes:
+  pgdata:
+
+networks:
+  internal:
